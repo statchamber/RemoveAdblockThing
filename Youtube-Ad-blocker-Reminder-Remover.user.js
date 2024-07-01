@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Remove Adblock Thing
 // @namespace    http://tampermonkey.net/
-// @version      5.6
+// @version      5.6.1
 // @description  Removes Adblock Thing
 // @author       JoelMatic
 // @match        https://www.youtube.com/*
@@ -11,85 +11,52 @@
 // @grant        none
 // ==/UserScript==
 
-(function()
- {
-    //
-    //      Config
-    //
+(function() {
+    'use strict';
 
-    // Enable The Undetected Adblocker
-    const adblocker = true;
-
-    // Enable The Popup remover (pointless if you have the Undetected Adblocker)
-    const removePopup = false;
-
-    // Checks for updates (Removes the popup)
-    const updateCheck = true;
-
-    // Enable debug messages into the console
-    const debugMessages = true;
-
-    // Fix timestamps in the youtube comments for new method
-    const fixTimestamps = true;
-
-    // Enable custom modal
-    // Uses SweetAlert2 library (https://cdn.jsdelivr.net/npm/sweetalert2@11) for the update version modal.
-    // When set to false, the default window popup will be used. And the library will not be loaded.
-    const updateModal = {
-        enable: true, // if true, replaces default window popup with a custom modal
-        timer: 5000, // timer: number | false
+    // Config
+    const config = {
+        adblocker: true,
+        removePopup: false,
+        updateCheck: true,
+        debugMessages: true,
+        fixTimestamps: true,
+        updateModal: {
+            enable: true,
+            timer: 5000,
+        }
     };
 
-
-    //
-    //      CODE
-    //
-    // If you have any suggestions, bug reports,
-    // or want to contribute to this userscript,
-    // feel free to create issues or pull requests in the GitHub repository.
-    //
-    // GITHUB: https://github.com/TheRealJoelmatic/RemoveAdblockThing
-
-    //
-    // Varables used for adblock
-    //
-
-    // Store the initial URL
+    // Variables
     let currentUrl = window.location.href;
-
-    // Used for after the player is updated
     let isVideoPlayerModified = false;
-
-    //
-    // Variables used for updater
-    //
-
     let hasIgnoredUpdate = false;
 
-    //
     // Setup
-    //
-
-    //Set everything up here
     log("Script started");
 
-    if (adblocker) removeAds();
-    if (removePopup) popupRemover();
-    if (updateCheck) checkForUpdate();
-    if (fixTimestamps) timestampFix();
+    function initialize() {
+        if (config.adblocker) removeAds();
+        if (config.removePopup) popupRemover();
+        if (config.updateCheck) checkForUpdate();
+        if (config.fixTimestamps) timestampFix();
+    }
 
-    // Remove Them pesski popups
+    // Ensure the script runs even if the page is not fully loaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialize);
+    } else {
+        initialize();
+    }
+
     function popupRemover() {
-
-        setInterval(() => {
+        const popupRemoverInterval = setInterval(() => {
             const modalOverlay = document.querySelector("tp-yt-iron-overlay-backdrop");
             const popup = document.querySelector(".style-scope ytd-enforcement-message-view-model");
             const popupButton = document.getElementById("dismiss-button");
+            const video = document.querySelector('video');
 
-            var video = document.querySelector('video');
-
-            const bodyStyle = document.body.style;
-            bodyStyle.setProperty('overflow-y', 'auto', 'important');
+            document.body.style.setProperty('overflow-y', 'auto', 'important');
 
             if (modalOverlay) {
                 modalOverlay.removeAttribute("opened");
@@ -98,33 +65,28 @@
 
             if (popup) {
                 log("Popup detected, removing...");
-
-                if(popupButton) popupButton.click();
-
+                if (popupButton) popupButton.click();
                 popup.remove();
-                video.play();
-
+                if (video) video.play();
                 setTimeout(() => {
-                    video.play();
+                    if (video && video.paused) video.play();
                 }, 500);
-
                 log("Popup removed");
             }
-            // Check if the video is paused after removing the popup
-            if (!video.paused) return;
-            // UnPause The Video
-            video.play();
 
+            if (video && video.paused) {
+                video.play();
+            }
         }, 1000);
+
+        // Ensure the interval is cleared when the page is unloaded
+        window.addEventListener('beforeunload', () => clearInterval(popupRemoverInterval));
     }
 
-    // undetected adblocker method
-    function removeAds()
-    {
+    function removeAds() {
         log("removeAds()");
 
-        setInterval(() =>{
-
+        const adRemoverInterval = setInterval(() => {
             if (window.location.href !== currentUrl) {
                 currentUrl = window.location.href;
                 isVideoPlayerModified = false;
@@ -132,100 +94,91 @@
                 removePageAds();
             }
 
-            // Fix for youtube shorts
             if (window.location.href.includes("shorts")) {
                 log("Youtube shorts detected, ignoring...");
                 return;
             }
 
-            if (isVideoPlayerModified){
+            if (isVideoPlayerModified) {
                 removeAllDuplicateVideos();
                 return;
             }
 
             log("Video replacement started!");
 
-            //
-            // remove ad audio
-            //
+            const video = document.querySelector('video');
+            if (video) {
+                video.volume = 0;
+                video.pause();
+                video.remove();
+            }
 
-            var video = document.querySelector('video');
-            if (video) video.volume = 0;
-            if (video) video.pause();
-            if (video) video.remove();
-
-            //
-            // Remove the current player
-            //
-
-            if(!clearAllPlayers()){
+            if (!clearAllPlayers()) {
                 return;
             }
 
-            //
-            // Get the url
-            //
+            let errorScreen = document.querySelector("#error-screen");
+            if (errorScreen) {
+                errorScreen.remove();
+            }
 
-            let videoID = '';
-            const baseURL = 'https://www.youtube.com/watch?v=';
-            const startIndex = currentUrl.indexOf(baseURL);
-
-
-            if (startIndex !== -1) {
-                // Extract the part of the URL after the base URL
-                const videoIDStart = startIndex + baseURL.length;
-                videoID = currentUrl.substring(videoIDStart);
-
-                const ampersandIndex = videoID.indexOf('&');
-                if (ampersandIndex !== -1) {
-                    videoID = videoID.substring(0, ampersandIndex);
-                }
-
-            } else {
-                log("YouTube video URL not found.", "e")
-                return null;
+            const videoID = getVideoID();
+            if (!videoID) {
+                log("YouTube video URL not found.", "error");
+                return;
             }
 
             log("Video ID: " + videoID);
 
-            //
-            // Create new frame for the video
-            //
-
-            const startOfUrl = "https://www.youtube-nocookie.com/embed/";
-            const endOfUrl = "?autoplay=1&modestbranding=1";
-            const finalUrl = startOfUrl + videoID + endOfUrl;
-
-            const iframe = document.createElement('iframe');
-
-            iframe.setAttribute('src', finalUrl);
-            iframe.setAttribute('frameborder', '0');
-            iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
-            iframe.setAttribute('allowfullscreen', true);
-            iframe.setAttribute('mozallowfullscreen', "mozallowfullscreen");
-            iframe.setAttribute('msallowfullscreen', "msallowfullscreen");
-            iframe.setAttribute('oallowfullscreen', "oallowfullscreen");
-            iframe.setAttribute('webkitallowfullscreen', "webkitallowfullscreen");
-
-            iframe.style.width = '100%';
-            iframe.style.height = '100%';
-            iframe.style.position = 'absolute';
-            iframe.style.top = '0';
-            iframe.style.left = '0';
-            iframe.style.zIndex = '9999';
-            iframe.style.pointerEvents = 'all'; 
-
-            const videoPlayerElement = document.querySelector('.html5-video-player');
-            videoPlayerElement.appendChild(iframe);
-            log("Finished");
+            createNewVideoFrame(videoID);
 
             isVideoPlayerModified = true;
-        }, 500)
+        }, 500);
+
         removePageAds();
+
+        // Ensure the interval is cleared when the page is unloaded
+        window.addEventListener('beforeunload', () => clearInterval(adRemoverInterval));
     }
-    //
-    // logic functionm
-    // 
+
+    function getVideoID() {
+        const url = new URL(window.location.href);
+        const urlParams = new URLSearchParams(url.search);
+
+        if (urlParams.has('v')) {
+            return urlParams.get('v');
+        } else {
+            const pathSegments = url.pathname.split('/');
+            const liveIndex = pathSegments.indexOf('live');
+            if (liveIndex !== -1 && liveIndex + 1 < pathSegments.length) {
+                return pathSegments[liveIndex + 1];
+            }
+        }
+
+        return null;
+    }
+
+    function createNewVideoFrame(videoID, videoPlayerElement) {
+        const startOfUrl = "https://www.youtube-nocookie.com/embed/";
+        const endOfUrl = "?autoplay=1&modestbranding=1&rel=0";
+        const finalUrl = startOfUrl + videoID + endOfUrl;
+
+        const iframe = document.createElement('iframe');
+        iframe.setAttribute('src', finalUrl);
+        iframe.setAttribute('frameborder', '0');
+        iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+        iframe.setAttribute('allowfullscreen', true);
+        iframe.style.cssText = 'width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 9999; pointer-events: all;';
+        const videoPlayerElements = document.querySelectorAll('.html5-video-player');
+        videoPlayerElements.forEach(videoPlayerElement => {
+            if (!videoPlayerElement.closest('.video-preview') && !videoPlayerElement.closest('#video-preview')) {
+                videoPlayerElement.appendChild(iframe);
+                log("New video frame created");
+            } else {
+                log("Video preview detected, ignoring...");
+            }
+        });
+    }
 
     function removeAllDuplicateVideos() {
         const videos = document.querySelectorAll('video');
@@ -252,31 +205,26 @@
     }
 
     function clearAllPlayers() {
-    
         const videoPlayerElements = document.querySelectorAll('.html5-video-player');
-    
+
         if (videoPlayerElements.length === 0) {
-            console.error("No elements with class 'html5-video-player' found.");
+            log("No elements with class 'html5-video-player' found.", "error");
             return false;
         }
-    
+
         videoPlayerElements.forEach(videoPlayerElement => {
-        const iframes = videoPlayerElement.querySelectorAll('iframe');
-        iframes.forEach(iframe => {
-            iframe.remove();
+            const iframes = videoPlayerElement.querySelectorAll('iframe');
+            iframes.forEach(iframe => {
+                iframe.remove();
+            });
         });
-    });
-    
-        console.log("Removed all current players!");
+
+        log("Removed all current players!");
         return true;
     }
 
-    //removes ads on the page (not video player ads)
-    function removePageAds(){
-
-        const sponsor = document.querySelectorAll("div#player-ads.style-scope.ytd-watch-flexy, div#panels.style-scope.ytd-watch-flexy");
+    function removePageAds() {
         const style = document.createElement('style');
-
         style.textContent = `
             ytd-action-companion-ad-renderer,
             ytd-display-ad-renderer,
@@ -300,7 +248,6 @@
             ytm-promoted-sparkles-web-renderer,
             masthead-ad,
             tp-yt-iron-overlay-backdrop,
-
             #masthead-ad {
                 display: none !important;
             }
@@ -308,16 +255,16 @@
 
         document.head.appendChild(style);
 
+        const sponsor = document.querySelectorAll("div#player-ads.style-scope.ytd-watch-flexy, div#panels.style-scope.ytd-watch-flexy");
         sponsor?.forEach((element) => {
-             if (element.getAttribute("id") === "rendering-content") {
+            if (element.getAttribute("id") === "rendering-content") {
                 element.childNodes?.forEach((childElement) => {
-                  if (childElement?.data.targetId && childElement?.data.targetId !=="engagement-panel-macro-markers-description-chapters"){
-                      //Skipping the Chapters section
+                    if (childElement?.data?.targetId && childElement?.data?.targetId !== "engagement-panel-macro-markers-description-chapters") {
                         element.style.display = 'none';
                     }
-                   });
+                });
             }
-         });
+        });
 
         log("Removed page ads (✔️)");
     }
@@ -349,145 +296,130 @@
         });
     }
 
-    function observerCallback(mutations) {
-        let isVideoAdded = mutations.some(mutation => 
+    const observer = new MutationObserver((mutations) => {
+        let isVideoAdded = mutations.some(mutation =>
             Array.from(mutation.addedNodes).some(node => node.tagName === 'VIDEO')
         );
 
         if (isVideoAdded) {
             log("New video detected, checking for duplicates.");
-            // Ignore for youtube shorts
             if (window.location.href.includes("shorts")) {
                 log("Youtube shorts detected, ignoring...");
                 return;
             }
             removeAllDuplicateVideos();
         }
-    }
+    });
 
-    const observer = new MutationObserver(observerCallback);
     observer.observe(document.body, { childList: true, subtree: true });
 
-    //
-    // Update check
-    //
-
-    function checkForUpdate(){
-
-        if (window.top !== window.self && !(window.location.href.includes("youtube.com"))){
-            return;
-        }
-
-        if (hasIgnoredUpdate){
+    function checkForUpdate() {
+        if ((window.top !== window.self && !window.location.href.includes("youtube.com")) || hasIgnoredUpdate) {
             return;
         }
 
         const scriptUrl = 'https://raw.githubusercontent.com/TheRealJoelmatic/RemoveAdblockThing/main/Youtube-Ad-blocker-Reminder-Remover.user.js';
 
         fetch(scriptUrl)
-        .then(response => response.text())
-        .then(data => {
-            // Extract version from the script on GitHub
-            const match = data.match(/@version\s+(\d+\.\d+)/);
-            if (!match) {
-                log("Unable to extract version from the GitHub script.", "e")
-                return;
-            }
-
-            const githubVersion = parseFloat(match[1]);
-            const currentVersion = parseFloat(GM_info.script.version);
-
-            if (githubVersion <= currentVersion) {
-                log('You have the latest version of the script. ' + githubVersion + " : " + currentVersion);
-                return;
-            }
-
-            console.log('Remove Adblock Thing: A new version is available. Please update your script. ' + githubVersion + " : " + currentVersion);
-
-            if(updateModal.enable){
-                // if a version is skipped, don't show the update message again until the next version
-                if (parseFloat(localStorage.getItem('skipRemoveAdblockThingVersion')) === githubVersion) {
+            .then(response => response.text())
+            .then(data => {
+                const match = data.match(/@version\s+(\d+\.\d+)/);
+                if (!match) {
+                    log("Unable to extract version from the GitHub script.", "error");
                     return;
                 }
-                // If enabled, include the SweetAlert2 library
-                const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/sweetalert2@11';
-                document.head.appendChild(script);
 
-                const style = document.createElement('style');
-                style.textContent = '.swal2-container { z-index: 2400; }';
-                document.head.appendChild(style);
+                const githubVersion = parseFloat(match[1]);
+                const currentVersion = parseFloat(GM_info.script.version);
 
-                // Wait for SweetAlert to be fully loaded
-                script.onload = function () {
-
-                    Swal.fire({
-                        position: "top-end",
-                        backdrop: false,
-                        title: 'Remove Adblock Thing: New version is available.',
-                        text: 'Do you want to update?',
-                        showCancelButton: true,
-                        showDenyButton: true,
-                        confirmButtonText: 'Update',
-                        denyButtonText:'Skip',
-                        cancelButtonText: 'Close',
-                        timer: updateModal.timer ?? 5000,
-                        timerProgressBar: true,
-                        didOpen: (modal) => {
-                            modal.onmouseenter = Swal.stopTimer;
-                            modal.onmouseleave = Swal.resumeTimer;
-                        }
-                    }).then((result) => {
-                        if (result.isConfirmed) {
-                            window.location.replace(scriptUrl);
-                        } else if(result.isDenied) {
-                            localStorage.setItem('skipRemoveAdblockThingVersion', githubVersion);
-                        }
-                    });
-                };
-
-                script.onerror = function () {
-                    var result = window.confirm("Remove Adblock Thing: A new version is available. Please update your script.");
-                    if (result) {
-                        window.location.replace(scriptUrl);
-                    }
+                if (githubVersion <= currentVersion) {
+                    log(`You have the latest version of the script. ${githubVersion} : ${currentVersion}`);
+                    return;
                 }
-            } else {
-                var result = window.confirm("Remove Adblock Thing: A new version is available. Please update your script.");
 
-                if (result) {
-                    window.location.replace(scriptUrl);
+                log(`A new version is available. Please update your script. ${githubVersion} : ${currentVersion}`);
+
+                if (config.updateModal.enable) {
+                    showUpdateModal(githubVersion, scriptUrl);
+                } else {
+                    showUpdateAlert(scriptUrl);
                 }
-            }
-        })
-        .catch(error => {
-            hasIgnoredUpdate = true;
-            log("Error checking for updates:", "e", error)
-        });
-        hasIgnoredUpdate = true;
+            })
+            .catch(error => {
+                hasIgnoredUpdate = true;
+                log("Error checking for updates:", "error", error);
+            });
     }
 
-    // Used for debug messages
-    function log(log, level, ...args) {
-
-        if(!debugMessages)
+    function showUpdateModal(githubVersion, scriptUrl) {
+        if (parseFloat(localStorage.getItem('skipRemoveAdblockThingVersion')) === githubVersion) {
             return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/sweetalert2@11';
+        document.head.appendChild(script);
+
+        const style = document.createElement('style');
+        style.textContent = '.swal2-container { z-index: 2400; }';
+        document.head.appendChild(style);
+
+        script.onload = function () {
+            Swal.fire({
+                position: "top-end",
+                backdrop: false,
+                title: 'Remove Adblock Thing: New version is available.',
+                text: 'Do you want to update?',
+                showCancelButton: true,
+                showDenyButton: true,
+                confirmButtonText: 'Update',
+                denyButtonText: 'Skip',
+                cancelButtonText: 'Close',
+                timer: config.updateModal.timer ?? 5000,
+                timerProgressBar: true,
+                didOpen: (modal) => {
+                    modal.onmouseenter = Swal.stopTimer;
+                    modal.onmouseleave = Swal.resumeTimer;
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    window.location.replace(scriptUrl);
+                } else if (result.isDenied) {
+                    localStorage.setItem('skipRemoveAdblockThingVersion', githubVersion);
+                }
+            });
+        };
+
+        script.onerror = function () {
+            showUpdateAlert(scriptUrl);
+        };
+    }
+
+    function showUpdateAlert(scriptUrl) {
+        var result = window.confirm("Remove Adblock Thing: A new version is available. Please update your script.");
+        if (result) {
+            window.location.replace(scriptUrl);
+        }
+    }
+
+    function log(message, level = 'info', ...args) {
+        if (!config.debugMessages) return;
 
         const prefix = '🔧 Remove Adblock Thing:';
-        const message = `${prefix} ${log}`;
+        const fullMessage = `${prefix} ${message}`;
+
         switch (level) {
             case 'error':
-                console.error(`❌ ${message}`, ...args);
+                console.error(`❌ ${fullMessage}`, ...args);
+                break;
+            case 'warn':
+                console.warn(`⚠️ ${fullMessage}`, ...args);
                 break;
             case 'log':
-                console.log(`✅ ${message}`, ...args);
-                break;
-            case 'warning':
-                console.warn(`⚠️ ${message}`, ...args);
+                console.log(`✅ ${fullMessage}`, ...args);
                 break;
             default:
-                console.info(`ℹ️ ${message}`, ...args);
-        }        
+                console.info(`ℹ️ ${fullMessage}`, ...args);
+        }
     }
-
 })();
